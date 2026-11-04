@@ -1,0 +1,21 @@
+# Local configuration and secrets
+.env
+sites/*/sqlconf.php
+sites/*/documents/
+sites/*/edi/
+sites/*/documents/certificates/
+
+# Dependencies and generated files
+/vendor/
+/node_modules/
+/.webpack-cache/
+*.log
+.phpunit.result.cache
+
+# IDE and OS files
+.idea/
+.vscode/
+*.user
+*.suo
+Thumbs.db
+.DS_Store

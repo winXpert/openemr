@@ -1,0 +1,133 @@
+<?php
+
+/**
+ * Top-level API and helper functions for the ESign module
+ *
+ * @package   OpenEMR
+ * @link      https://www.open-emr.org
+ * @link      https://www.open-emr.org/wiki/index.php/OEMR_wiki_page OEMR
+ * @author    Ken Chapple <ken@mi-squared.com>
+ * @author    Medical Information Integration, LLC
+ * @copyright Copyright (c) 2013 OEMR
+ * @license   https://github.com/openemr/openemr/blob/master/LICENSE GNU General Public License 3
+ */
+
+namespace ESign;
+
+use OpenEMR\Common\Database\QueryUtils;
+use OpenEMR\Core\OEGlobalsBag;
+
+require_once OEGlobalsBag::getInstance()->getSrcDir() . '/ESign/ESign.php';
+require_once OEGlobalsBag::getInstance()->getSrcDir() . '/ESign/FactoryIF.php';
+require_once OEGlobalsBag::getInstance()->getSrcDir() . '/ESign/ConfigurationIF.php';
+require_once OEGlobalsBag::getInstance()->getSrcDir() . '/ESign/SignableIF.php';
+require_once OEGlobalsBag::getInstance()->getSrcDir() . '/ESign/Form/Factory.php';
+require_once OEGlobalsBag::getInstance()->getSrcDir() . '/ESign/Form/Configuration.php';
+require_once OEGlobalsBag::getInstance()->getSrcDir() . '/ESign/Encounter/Factory.php';
+require_once OEGlobalsBag::getInstance()->getSrcDir() . '/ESign/Encounter/Configuration.php';
+
+class Api
+{
+    public function lockEncounters()
+    {
+        return OEGlobalsBag::getInstance()->getBoolean('lock_esign_all');
+    }
+
+    public function formConfigToJson()
+    {
+        $configuration = new Form_Configuration();
+        return $this->configToJson($configuration);
+    }
+
+    public function createFormESign($formId, $formDir, $encounterId): ESign
+    {
+        $factory = new Form_Factory($formId, $formDir, $encounterId);
+        $esign = $this->createESign($factory);
+        return $esign;
+    }
+
+    public function encounterConfigToJson()
+    {
+        $configuration = new Encounter_Configuration();
+        return $this->configToJson($configuration);
+    }
+
+    public function createEncounterESign($encounterId): ESign
+    {
+        $factory = new Encounter_Factory($encounterId);
+        $esign = $this->createESign($factory);
+        return $esign;
+    }
+
+    /**
+     * Whether a form counts as signed on the patient report: it has a
+     * signature of its own, or it is locked, which includes an encounter
+     * signature locking it ("Lock e-signed encounters"). The encounter is
+     * the one the form row belongs to.
+     */
+    public function isFormSignedForReport(int $formId, string $formDir): bool
+    {
+        $encounter = QueryUtils::fetchSingleValue(
+            'SELECT `encounter` FROM `forms` WHERE `id` = ? AND `formdir` = ? AND `deleted` = 0',
+            'encounter',
+            [$formId, $formDir]
+        );
+        $encounterId = filter_var($encounter, FILTER_VALIDATE_INT);
+        if (!is_int($encounterId)) {
+            return false;
+        }
+        $esign = $this->createFormESign($formId, $formDir, $encounterId);
+        return $esign->isSigned() || $esign->isLocked();
+    }
+
+    public function createEncounterSignable($encounterId): Encounter_Signable
+    {
+        $signable = new Encounter_Signable($encounterId);
+        return $signable;
+    }
+
+    public function createESign(FactoryIF $factory): ESign
+    {
+        $configuration = $factory->createConfiguration();
+        $signable = $factory->createSignable();
+        $button = $factory->createButton();
+        $log = $factory->createLog();
+        $esign = new ESign($configuration, $signable, $button, $log);
+        return $esign;
+    }
+
+    /**
+     * This contains the configuration for the esign javascript object
+     *
+     * @return string
+     */
+    public function configToJson(ConfigurationIF $configuration)
+    {
+        $params = [
+            'baseUrl' => $configuration->getBaseUrl(),
+            'logViewAction' => $configuration->getLogViewAction(),
+            'formViewAction' => $configuration->getFormViewAction(),
+            'formSubmitAction' => $configuration->getFormSubmitAction(),
+            'module' => $configuration->getModule()
+        ];
+
+        $json = json_encode($params);
+        return $json;
+    }
+
+    public function sign(SignableIF $signable, $userId, $lock = false, $amendment = null)
+    {
+        try {
+            $ret = $signable->sign($userId, $lock, $amendment);
+            return $ret;
+        } catch (\Throwable $e) {
+            error_log(errorLogEscape($e->getMessage()));
+            return false;
+        }
+    }
+
+    public function lock(SignableIF $signable, $userId, $amendment = null)
+    {
+        return $this->sign($signable, $userId, true, $amendment);
+    }
+}

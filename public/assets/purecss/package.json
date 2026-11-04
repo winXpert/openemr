@@ -1,0 +1,78 @@
+{
+  "name": "purecss",
+  "version": "3.1.0",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/pure-css/pure.git"
+  },
+  "scripts": {
+    "build": "npm run lint:css && node scripts/build.mjs",
+    "lint": "eslint . --fix",
+    "lint:css": "node scripts/lint-css.mjs",
+    "prepare": "npm run release",
+    "release": "npm run build && node scripts/release.mjs",
+    "start": "cd site && npm install && npm run start",
+    "test": "npm run lint:css && tap test/*.mjs --disable-coverage",
+    "watch": "node --watch-path=src --watch-path=lib scripts/watch.mjs"
+  },
+  "files": [
+    "build/",
+    "lib/"
+  ],
+  "devDependencies": {
+    "@eslint-react/eslint-plugin": "^5.21.0",
+    "@eslint/js": "^10.0.1",
+    "archiver": "^8.0.0",
+    "autoprefixer": "^10.4.2",
+    "clean-css": "^5.3.2",
+    "csslint": "^1.0.5",
+    "eslint": "^10.11.0",
+    "globals": "^17.12.0",
+    "husky": "^9.0.11",
+    "normalize.css": "^8.0.1",
+    "postcss": "^8.5.28",
+    "tap": "^21.8.0"
+  },
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": ">=26",
+      "onFail": "warn"
+    },
+    "packageManager": {
+      "name": "npm",
+      "version": ">=12",
+      "onFail": "warn"
+    }
+  },
+  "description": "Pure is a ridiculously tiny CSS library you can use to start any web project.",
+  "bugs": {
+    "url": "https://github.com/pure-css/pure/issues"
+  },
+  "homepage": "https://purecss.io",
+  "main": "index.js",
+  "browser": "build/pure-min.css",
+  "style": "build/pure.css",
+  "keywords": [
+    "pure",
+    "css",
+    "purecss",
+    "yahoo"
+  ],
+  "authors": [
+    "ericf <edf@ericf.me>",
+    "tilomitra <tilomitra@gmail.com>",
+    "msweeney <matt.sweeney@yahoo.com>",
+    "jamesalley <manalagi001@yahoo.com>"
+  ],
+  "license": "BSD-3-Clause",
+  "browserslist": "> 1%",
+  "husky": {
+    "hooks": {
+      "pre-commit": "npm test"
+    }
+  },
+  "overrides": {
+    "lodash": "^4.18.1"
+  }
+}
