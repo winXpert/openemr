@@ -144,7 +144,7 @@ if (! AclMain::aclCheckCore('acct', 'rep')) {
 }
 
 // this is "" or "submit" or "export".
-$form_action = $_POST['form_action'];
+$form_action = $_POST['form_action'] ?? '';
 
 $form_from_date = (isset($_POST['form_from_date'])) ? DateToYYYYMMDD($_POST['form_from_date']) : date('Y-m-d');
 $form_to_date   = (isset($_POST['form_to_date'])) ? DateToYYYYMMDD($_POST['form_to_date']) : date('Y-m-d');

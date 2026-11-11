@@ -1087,6 +1087,36 @@ final class EventAuditLoggerTest extends TestCase
         $this->assertIsObject($result);
     }
 
+    #[DataProvider('auditPaginationProvider')]
+    public function testGetEventsBoundsBufferedResults(array $pagination, string $expectedLimit): void
+    {
+        $mockAdodb = $this->createMockAdodb();
+        $this->setGlobalAdodbMock($mockAdodb);
+        $mockAdodb->expects($this->once())->method('Execute')->with(
+            $this->callback(function (string $sql) use ($expectedLimit): bool {
+                $this->assertStringEndsWith($expectedLimit, $sql);
+                return true;
+            }),
+            $this->anything()
+        );
+
+        $this->eventAuditLogger->getEvents(array_merge([
+            'sdate' => '2026-11-11 00:00:00',
+            'edate' => '2026-11-11 23:59:59',
+        ], $pagination));
+    }
+
+    public static function auditPaginationProvider(): array
+    {
+        return [
+            'default preserves existing callers' => [[], ' LIMIT 5000 OFFSET 0'],
+            'main log next page' => [['limit' => 101, 'start' => 100], ' LIMIT 101 OFFSET 100'],
+            'disclosures next page' => [['event' => 'disclosure', 'limit' => 101, 'start' => 100], ' LIMIT 101 OFFSET 100'],
+            'negative values' => [['limit' => -10, 'start' => -1], ' LIMIT 1 OFFSET 0'],
+            'oversized limit' => [['limit' => 100000], ' LIMIT 5000 OFFSET 0'],
+        ];
+    }
+
     /**
      * Test getEvents method with extended_log (event parameter)
      */

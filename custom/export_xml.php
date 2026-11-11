@@ -108,6 +108,7 @@ foreach (['primary','secondary','tertiary'] as $value) {
   "a1.zip AS zip1, a1.plus_four AS zip41, a1.country AS country1, " .
   "i2.policy_number AS policy2, i2.group_number AS group2, i2.provider as provider2, " .
   "i2.subscriber_fname AS fname2, i2.subscriber_mname AS mname2, i2.subscriber_lname AS lname2, " .
+  "i2.subscriber_street AS sstreet2, i2.subscriber_city AS scity2, i2.subscriber_state AS sstate2, " .
   "i2.subscriber_postal_code AS szip2, i2.subscriber_relationship AS relationship2, " .
   "i2.subscriber_DOB AS sdob2, i2.subscriber_ss AS sss2, i2.subscriber_phone AS sphone2, " .
   "i2.subscriber_sex AS ssex2, i2.subscriber_country AS scountry2, " .
@@ -120,6 +121,7 @@ foreach (['primary','secondary','tertiary'] as $value) {
   "a2.zip AS zip2, a2.plus_four AS zip42, a2.country AS country2, " .
   "i3.policy_number AS policy3, i3.group_number AS group3, i3.provider as provider3, " .
   "i3.subscriber_fname AS fname3, i3.subscriber_mname AS mname3, i3.subscriber_lname AS lname3, " .
+  "i3.subscriber_street AS sstreet3, i3.subscriber_city AS scity3, i3.subscriber_state AS sstate3, " .
   "i3.subscriber_postal_code AS szip3, i3.subscriber_relationship AS relationship3, " .
   "i3.subscriber_DOB AS sdob3, i3.subscriber_ss AS sss3, i3.subscriber_phone AS sphone3, " .
   "i3.subscriber_sex AS ssex3, i3.subscriber_country AS scountry3, " .

@@ -35,6 +35,28 @@ if (!empty($_GET)) {
     CsrfUtils::checkCsrfInput(INPUT_GET, dieOnFail: true);
 }
 
+$logPageSize = 100;
+$logPage = filter_var($_GET['log_page'] ?? 0, FILTER_VALIDATE_INT, [
+    'options' => ['min_range' => 0, 'max_range' => intdiv(PHP_INT_MAX, $logPageSize) - 1]
+]) ?: 0;
+$logOffset = $logPage * $logPageSize;
+$hasNextLogPage = false;
+
+// Keep full audit comments intact while keeping table rows compact.
+$renderLogComment = static function (string $comment): void {
+    $comment = mb_convert_encoding($comment, 'UTF-8', 'UTF-8');
+    $preview = trim(preg_replace('/\s+/u', ' ', $comment));
+    if (mb_strlen($comment, 'UTF-8') <= 160) {
+        echo nl2br(text($comment));
+        return;
+    }
+    ?>
+    <button type="button" class="log-comment-preview" aria-label="<?php echo xla('Show full comment'); ?>">
+        <?php echo text(mb_substr($preview, 0, 160, 'UTF-8') . (mb_strlen($preview, 'UTF-8') > 160 ? '…' : '')); ?>
+    </button><span class="log-comment-full" hidden><?php echo text($comment); ?></span>
+    <?php
+};
+
 ?>
 <html>
 <head>
@@ -45,6 +67,61 @@ if (!empty($_GET)) {
     <style>
       .sortby {
         cursor: pointer;
+      }
+      .log-loading-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 2000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(255, 255, 255, .82);
+        cursor: progress;
+      }
+      .log-loading-overlay[hidden] { display: none; }
+      .log-loading-panel {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 20px 28px;
+        border: 1px solid var(--gray-300, #dee2e6);
+        border-radius: 12px;
+        background: var(--white, #fff);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, .1);
+      }
+      .log-loading-spinner {
+        width: 24px;
+        height: 24px;
+        border: 3px solid var(--gray-300, #dee2e6);
+        border-top-color: var(--primary, #007bff);
+        border-radius: 50%;
+        animation: log-loading-spin .8s linear infinite;
+      }
+      @keyframes log-loading-spin { to { transform: rotate(360deg); } }
+      @media (prefers-reduced-motion: reduce) { .log-loading-spinner { animation: none; } }
+      .log-comment-preview {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        overflow-wrap: anywhere;
+        max-width: 32rem;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+        text-align: start;
+        cursor: help;
+      }
+      .log-comment-preview:hover { text-decoration: underline dotted; }
+      .log-comment-preview:focus-visible { outline: 2px solid var(--primary, #007bff); outline-offset: 3px; }
+      .log-comment-popover { max-width: min(42rem, calc(100vw - 24px)); }
+      .log-comment-popover .popover-body {
+        max-height: min(24rem, 60vh);
+        overflow: auto;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
       }
     </style>
     <script>
@@ -71,7 +148,13 @@ if (!empty($_GET)) {
     </script>
 </head>
 <body class="body_top">
-    <div id="container_div" class="container-fluid">
+    <div id="log-loading" class="log-loading-overlay" role="status" aria-live="polite">
+        <div class="log-loading-panel">
+            <span class="log-loading-spinner" aria-hidden="true"></span>
+            <span><?php echo xlt('Loading logs, please wait...'); ?></span>
+        </div>
+    </div>
+    <div id="container_div" class="container-fluid" aria-busy="true">
         <div class="row">
             <div class="col-sm-12">
                 <div class="clearfix">
@@ -293,7 +376,7 @@ if (!empty($_GET)) {
                                 </div>
                                 <input type="hidden" name="event" value="<?php echo attr($event ?? ''); ?>" />
                                 <div class="btn-group" role="group">
-                                    <a href="javascript:document.theform.submit();" class="btn btn-secondary btn-save"><?php echo xlt('Submit'); ?></a>
+                                    <button type="submit" id="log-submit" class="btn btn-secondary btn-save"><?php echo xlt('Submit'); ?></button>
                                 </div>
                             </form>
                             <?php if (!(!empty($_GET['show']) && ($_GET['show'] = 'show') && $start_date && $end_date && ($err_message != 1))) { ?>
@@ -319,7 +402,7 @@ if (!empty($_GET)) {
                                             <th id="sortby_comments" class="sortby" title="<?php echo xla('Sort by Comments'); ?>"><?php echo xlt('Comments'); ?></th>
                                         </tr>
                                         </thead>
-                                        <tbody
+                                        <tbody>
                                         <?php
                                         ?>
                                         <input type="hidden" name="event" value="<?php echo attr($eventname) . "-" . attr($type_event) ?>" />
@@ -340,11 +423,16 @@ if (!empty($_GET)) {
                                             $gev = $getevent;
                                         }
 
-                                        if ($ret = EventAuditLogger::getInstance()->getEvents(['sdate' => $start_date, 'edate' => $end_date, 'user' => $form_user, 'patient' => $form_pid, 'sortby' => $_GET['sortby'], 'levent' => $gev, 'tevent' => $tevent, 'direction' => $_GET['direction'], 'client_id' => $form_client_id])) {
+                                        if ($ret = EventAuditLogger::getInstance()->getEvents(['sdate' => $start_date, 'edate' => $end_date, 'user' => $form_user, 'patient' => $form_pid, 'sortby' => $sortby, 'levent' => $gev, 'tevent' => $tevent, 'direction' => ($_GET['direction'] ?? 'asc'), 'client_id' => $form_client_id, 'limit' => $logPageSize + 1, 'start' => $logOffset])) {
                                             // Set up crypto object (object will increase performance since caches used keys)
                                             $cryptoGen = ServiceContainer::getCrypto();
 
+                                            $logRowCount = 0;
                                             while ($iter = sqlFetchArray($ret)) {
+                                                if ($logRowCount++ >= $logPageSize) {
+                                                    $hasNextLogPage = true;
+                                                    break;
+                                                }
                                                 if (empty($iter['id'])) {
                                                     //skip empty log items (this means they were deleted and will show up as deleted in the audit log tamper script)
                                                     continue;
@@ -412,7 +500,7 @@ if (!empty($_GET)) {
                                                     <td><?php
                                                         // Convert select term to Query for MU2 requirements
                                                         // Also using mb_convert_encoding to change binary stuff (uuid) to just be '?' characters
-                                                        echo nl2br(text(preg_replace('/^select/i', 'Query', mb_convert_encoding($trans_comments, 'UTF-8', 'UTF-8'))));
+                                                        $renderLogComment(preg_replace('/^select/i', 'Query', $trans_comments));
                                                     ?>
                                                     </td>
                                                 </tr>
@@ -421,14 +509,23 @@ if (!empty($_GET)) {
                                             }
                                         }
 
+                                        if (is_object($ret)) {
+                                            $ret->Close();
+                                        }
+
                                         // Disclosures live in extended_log, which has no API client
                                         // attribution -- they are recorded via the UI disclosure feature,
                                         // never by an API client. When filtering by API client, skip them
                                         // rather than mixing unfiltered rows into a filtered view.
                                         if ((($eventname == "disclosure") || ($gev == "")) && $form_client_id === '') {
                                             $eventname = "disclosure";
-                                            if ($ret = EventAuditLogger::getInstance()->getEvents(['sdate' => $start_date, 'edate' => $end_date, 'user' => $form_user, 'patient' => $form_pid, 'sortby' => $_GET['sortby'], 'event' => $eventname])) {
+                                            if ($ret = EventAuditLogger::getInstance()->getEvents(['sdate' => $start_date, 'edate' => $end_date, 'user' => $form_user, 'patient' => $form_pid, 'sortby' => $sortby, 'event' => $eventname, 'limit' => $logPageSize + 1, 'start' => $logOffset])) {
+                                                $logRowCount = 0;
                                                 while ($iter = sqlFetchArray($ret)) {
+                                                    if ($logRowCount++ >= $logPageSize) {
+                                                        $hasNextLogPage = true;
+                                                        break;
+                                                    }
                                                     $comments = xl('Recipient Name') . ":" . $iter["recipient"] . ";" . xl('Disclosure Info') . ":" . $iter["description"];
                                                     ?>
                                                     <tr>
@@ -441,15 +538,33 @@ if (!empty($_GET)) {
                                                         <td><?php echo text($iter["patient_id"]); ?></td>
                                                         <td><?php echo text($iter["success"] ?? ''); ?></td>
                                                         <td></td>
-                                                        <td><?php echo text($comments); ?></td>
+                                                        <td><?php $renderLogComment($comments); ?></td>
                                                     </tr>
                                                     <?php
                                                 }
+                                                $ret->Close();
                                             }
                                         }
                                         ?>
+                                        </tbody>
                                     </table>
                                 </div>
+                                <p class="text-muted small"><?php echo xlt('Up to 100 entries from each log per page.'); ?></p>
+                                <nav class="d-flex align-items-center justify-content-between" aria-label="<?php echo xla('Log pagination'); ?>">
+                                    <?php
+                                    $logPageParams = $_GET;
+                                    if ($logPage > 0) {
+                                        $logPageParams['log_page'] = $logPage - 1;
+                                        ?>
+                                        <a class="btn btn-secondary log-page-link" href="?<?php echo attr(http_build_query($logPageParams)); ?>"><?php echo xlt('Previous'); ?></a>
+                                    <?php } ?>
+                                    <span class="mx-2"><?php echo xlt('Page'); ?> <?php echo text($logPage + 1); ?></span>
+                                    <?php if ($hasNextLogPage) {
+                                        $logPageParams['log_page'] = $logPage + 1;
+                                        ?>
+                                        <a class="btn btn-secondary log-page-link" href="?<?php echo attr(http_build_query($logPageParams)); ?>"><?php echo xlt('Next'); ?></a>
+                                    <?php } ?>
+                                </nav>
                             <?php } ?>
                         </div>
                     </div>
@@ -475,6 +590,94 @@ if (!empty($_GET)) {
         <script>
             // jQuery stuff to make the page a little easier to use
             $(function () {
+                var logLoading = false;
+                function resetLogLoading() {
+                    logLoading = false;
+                    $('#log-loading').prop('hidden', true);
+                    $('#container_div').attr('aria-busy', 'false');
+                    $('#log-submit').prop('disabled', false);
+                    $('.log-page-link').removeAttr('aria-disabled');
+                }
+                function startLogLoading(navigate) {
+                    if (logLoading) {
+                        return;
+                    }
+                    top.restoreSession();
+                    logLoading = true;
+                    $('#log-loading').prop('hidden', false);
+                    $('#container_div').attr('aria-busy', 'true');
+                    $('#log-submit').prop('disabled', true);
+                    $('.log-page-link').attr('aria-disabled', 'true');
+                    // Give the browser time to paint the loader before navigation starts.
+                    setTimeout(navigate, 50);
+                }
+                resetLogLoading();
+                $(window).on('pageshow', resetLogLoading);
+                $('#theform').on('submit', function (event) {
+                    event.preventDefault();
+                    var form = this;
+                    startLogLoading(function () { HTMLFormElement.prototype.submit.call(form); });
+                });
+                $('.log-page-link').on('click', function (event) {
+                    if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.which > 1) {
+                        return;
+                    }
+                    event.preventDefault();
+                    var href = this.href;
+                    startLogLoading(function () { window.location.assign(href); });
+                });
+
+                var activeComment = null;
+                var commentHideTimer;
+                function hideComment() {
+                    if (activeComment) {
+                        $(activeComment).popover('hide');
+                        activeComment = null;
+                    }
+                }
+                function deferHideComment() {
+                    clearTimeout(commentHideTimer);
+                    commentHideTimer = setTimeout(function () {
+                        if (!activeComment) {
+                            return;
+                        }
+                        var popup = document.getElementById($(activeComment).attr('aria-describedby'));
+                        if (!$(activeComment).is(':hover, :focus') && !$(popup).is(':hover') && !$(popup).find(':focus').length) {
+                            hideComment();
+                        }
+                    }, 150);
+                }
+                $('.log-comment-preview').popover({
+                    trigger: 'manual',
+                    container: 'body',
+                    placement: 'auto',
+                    html: false,
+                    animation: false,
+                    content: function () { return $(this).next('.log-comment-full').text(); },
+                    template: '<div class="popover log-comment-popover" role="tooltip"><div class="arrow"></div><div class="popover-body" tabindex="0"></div></div>'
+                }).on('mouseenter focusin click', function () {
+                    clearTimeout(commentHideTimer);
+                    if (activeComment !== this) {
+                        hideComment();
+                        activeComment = this;
+                        $(this).popover('show');
+                    }
+                }).on('mouseleave focusout', deferHideComment).on('keydown', function (event) {
+                    if (event.key === 'Tab' && !event.shiftKey && activeComment === this) {
+                        var popup = document.getElementById($(this).attr('aria-describedby'));
+                        $(popup).find('.popover-body').trigger('focus');
+                        event.preventDefault();
+                    }
+                });
+                $(document).on('mouseenter focusin', '.log-comment-popover', function () {
+                    clearTimeout(commentHideTimer);
+                }).on('mouseleave focusout', '.log-comment-popover', deferHideComment).on('keydown', function (event) {
+                    if (event.key === 'Escape' && activeComment) {
+                        var trigger = activeComment;
+                        trigger.focus();
+                        hideComment();
+                    }
+                });
                 $("#other-logs-div").hide();
                 $("#main-log-li").click(function () {
                     $("#main-log-div").show(250);

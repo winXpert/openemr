@@ -293,6 +293,8 @@ class EventAuditLogger implements AuditLoggerInterface
      *   user : a specific user  (defaults to none)
      *   cols : gather specific columns  (defaults to date,event,user,groupname,comments)
      *   sortby : sort the results by  (defaults to none)
+     *   limit : maximum rows to fetch (1 to 5000, defaults to 5000)
+     *   start : row offset for pagination (defaults to 0)
      * RETURNS:
      *   array of results
      ******************/
@@ -399,7 +401,10 @@ class EventAuditLogger implements AuditLoggerInterface
                 $sql .= " ORDER BY " . escape_sql_column_name($sortby, ['extended_log']) . " DESC"; // descending order
             }
 
-            $sql .= " LIMIT 5000";
+            if (isset($params['limit'])) {
+                $sql .= $sortby !== '' ? ", date, event, user, recipient, patient_id, description" :
+                    " ORDER BY date DESC, event, user, recipient, patient_id, description";
+            }
         } else {
             // do the query
             $sqlBindArray = [];
@@ -445,8 +450,15 @@ class EventAuditLogger implements AuditLoggerInterface
                 $sql .= " ORDER BY el.`log_id` DESC";
             }
 
-            $sql .= " LIMIT 5000";
+            if ($sortby !== '' && isset($params['limit'])) {
+                $sql .= ", el.`log_id` " . escape_sort_order($direction);
+            }
         }
+
+        // Bound buffered result sets; convert pagination values to integers before SQL interpolation.
+        $limit = max(1, min(5000, (int) ($params['limit'] ?? 5000)));
+        $start = max(0, (int) ($params['start'] ?? 0));
+        $sql .= " LIMIT " . $limit . " OFFSET " . $start;
 
         return sqlStatement($sql, $sqlBindArray);
     }

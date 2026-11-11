@@ -612,10 +612,15 @@ if ($form_warehouse) {
 }
 if ($is_user_restricted) {
     $restrictedWarehouses = genUserWarehouses();
-    $placeholders = implode(', ', array_fill(0, count($restrictedWarehouses), '?'));
-    // nosemgrep: php.lang.security.injection.tainted-sql-string.tainted-sql-string -- $placeholders contains only literal '?' characters, not user data
-    $fwconds[] = "di.warehouse_id IS NOT NULL AND di.warehouse_id IN (" . $placeholders . ")";
-    $fwbind = array_merge($fwbind, $restrictedWarehouses);
+    if ($restrictedWarehouses === []) {
+        // A restricted user with no allowed warehouses must not see inventory.
+        $fwconds[] = "1 = 0";
+    } else {
+        $placeholders = implode(', ', array_fill(0, count($restrictedWarehouses), '?'));
+        // nosemgrep: php.lang.security.injection.tainted-sql-string.tainted-sql-string -- $placeholders contains only literal '?' characters, not user data
+        $fwconds[] = "di.warehouse_id IS NOT NULL AND di.warehouse_id IN (" . $placeholders . ")";
+        $fwbind = array_merge($fwbind, $restrictedWarehouses);
+    }
 }
 $fwcond = $fwconds !== [] ? ' AND ' . implode(' AND ', $fwconds) : '';
 

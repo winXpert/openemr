@@ -55,8 +55,10 @@ if ($filename) {
     preg_match('/erx_error-\d{4}-\d{1,2}-\d{1,2}\.log/', (string) $filename, $matches);
 
     if ($matches) {
-        if ($fd = fopen($error_log_path . '/' . $filename, 'r')) {
-            $bat_content = fread($fd, filesize($error_log_path . '/' . $filename));
+        $log_file = $error_log_path . '/' . $filename;
+        if (is_file($log_file) && is_readable($log_file) && ($fd = fopen($log_file, 'r'))) {
+            $bat_content = stream_get_contents($fd);
+            fclose($fd);
         }
 
         header('Pragma: public');
@@ -116,20 +118,22 @@ if ($filename) {
 if (array_key_exists('search_logs', $_POST)) {
     CsrfUtils::checkCsrfInput(INPUT_POST, dieOnFail: true);
 
-    if ($handle = opendir($error_log_path)) {
+    if (is_dir($error_log_path) && is_readable($error_log_path) && ($handle = opendir($error_log_path))) {
         while (false !== ($file = readdir($handle))) {
             $file_as_in_folder = 'erx_error-' . $start_date . '.log';
 
-            if ($file != '.' && $file != '..' && $file_as_in_folder == $file) {
+            if ($file_as_in_folder == $file && is_file($error_log_path . '/' . $file) && is_readable($error_log_path . '/' . $file)) {
                 $check_for_file = 1;
                 $fd = fopen($error_log_path . '/' . $file, 'r');
-                $bat_content = fread($fd, filesize($error_log_path . '/' . $file));
+                $bat_content = stream_get_contents($fd);
+                fclose($fd);
                 ?>
                 <p><?php echo xlt('Download'); ?>: <a href="erx_logview.php?filename=<?php echo attr_url($file); ?>&csrf_token_form=<?php echo CsrfUtils::collectCsrfToken(session: $session); ?>"><?php echo text($file); ?></a></p>
                 <textarea rows="35" cols="132"><?php echo text($bat_content); ?></textarea>
                 <?php
             }
         }
+        closedir($handle);
     }
 
     if ($check_for_file == 0) {

@@ -98,7 +98,7 @@ function getEndInventory($product_id = 0, $warehouse_id = '~')
  * Render a line item for the inventory activity report HTML table.
  *
  * @param int $product_id
- * @param int $warehouse_id
+ * @param string $warehouse_id
  * @param int $patient_id
  * @param int $encounter_id
  * @param string $rowprod
@@ -110,7 +110,7 @@ function getEndInventory($product_id = 0, $warehouse_id = '~')
  */
 function inventoryActivityLineItem(
     int $product_id,
-    int $warehouse_id,
+    string $warehouse_id,
     int $patient_id,
     int $encounter_id,
     string $rowprod,
@@ -146,7 +146,7 @@ function inventoryActivityLineItem(
             // Print second-column totals.
             if ($form_action == 'export') {
                 // Export:
-                if (! $_POST['form_details']) {
+                if (empty($_POST['form_details'])) {
                     if ($product_first) {
                         echo csvEscape($product);
                         echo ',' . csvEscape($warehouse);
@@ -175,7 +175,7 @@ function inventoryActivityLineItem(
                     </td>
                     <td class="detail" colspan='3'>
                         <?php
-                        if ($_POST['form_details']) {
+                        if (!empty($_POST['form_details'])) {
                             echo xlt('Total for') . ' ';
                         }
                         echo text($warehouse); ?>
@@ -187,7 +187,7 @@ function inventoryActivityLineItem(
                     </td>
                     <td class="detail" colspan='3'>
                         <?php
-                        if ($_POST['form_details']) {
+                        if (!empty($_POST['form_details'])) {
                             echo xlt('Total for') . ' ';
                         }
                         echo text($product); ?>
@@ -289,7 +289,7 @@ function inventoryActivityLineItem(
     }
 
     // Detail line.
-    if ($_POST['form_details'] && $product_id && ($qtys[0] + $qtys[1] + $qtys[2] + $qtys[3] + $qtys[4])) {
+    if (!empty($_POST['form_details']) && $product_id && ($qtys[0] + $qtys[1] + $qtys[2] + $qtys[3] + $qtys[4])) {
         if ($form_action == 'export') {
             if ($product_first) {
                 echo csvEscape($product);
@@ -372,11 +372,11 @@ if (! AclMain::aclCheckCore('acct', 'rep')) {
 }
 
 // this is "" or "submit" or "export".
-$form_action = $_POST['form_action'];
+$form_action = $_POST['form_action'] ?? '';
 
 $form_from_date = (isset($_POST['form_from_date'])) ? DateToYYYYMMDD($_POST['form_from_date']) : date('Y-m-d');
 $form_to_date   = (isset($_POST['form_to_date'])) ? DateToYYYYMMDD($_POST['form_to_date']) : date('Y-m-d');
-$form_product  = $_POST['form_product'];
+$form_product  = $_POST['form_product'] ?? '';
 
 if ($form_action == 'export') {
     header("Pragma: public");
@@ -394,7 +394,7 @@ if ($form_action == 'export') {
         echo xlc('Product') . ',';
     }
 
-    if ($_POST['form_details']) {
+    if (!empty($_POST['form_details'])) {
         echo xlc('Date') . ',';
         echo xlc('Invoice') . ',';
         echo xlc('Sales') . ',';
@@ -540,7 +540,7 @@ table.mymaintable td, table.mymaintable th {
         <?php echo xlt('Details'); ?>:
      </td>
      <td colspan='3' nowrap>
-      <input type='checkbox' name='form_details' value='1'<?php echo ($_POST['form_details']) ? " checked" : "";?> />
+      <input type='checkbox' name='form_details' value='1'<?php echo (!empty($_POST['form_details'])) ? " checked" : "";?> />
      </td>
     </tr>
    </table>
@@ -576,7 +576,7 @@ table.mymaintable td, table.mymaintable th {
   <td class="dehead">
         <?php echo text($product_first ? xl('Product') : xl('Warehouse')); ?>
   </td>
-        <?php if ($_POST['form_details']) { ?>
+        <?php if (!empty($_POST['form_details'])) { ?>
   <td class="dehead">
             <?php echo text($product_first ? xl('Warehouse') : xl('Product')); ?>
   </td>
@@ -678,11 +678,11 @@ if ($form_action) { // if submit or export
             ) {
                 inventoryActivityLineItem(
                     $row['drug_id'],
-                    $row['warehouse_id'],
+                    $row['warehouse_id'] ?? '',
                     0,
                     0,
                     $row['name'],
-                    $row['title'],
+                    $row['title'] ?? '',
                     $row['destroy_date'],
                     [0, 0, 0, 0, 0 - $row['on_hand']],
                     xl('Destroyed')
@@ -708,14 +708,14 @@ if ($form_action) { // if submit or export
 
         inventoryActivityLineItem(
             $row['drug_id'],
-            $row['warehouse_id'],
+            $row['warehouse_id'] ?? '',
             $row['pid'] + 0,
             $row['encounter'] + 0,
             $row['name'],
-            $row['title'],
-            $row['sale_date'],
+            $row['title'] ?? '',
+            $row['sale_date'] ?? '',
             $qtys,
-            $row['invoice_refno']
+            $row['invoice_refno'] ?? ''
         );
     }
 

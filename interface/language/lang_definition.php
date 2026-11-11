@@ -102,12 +102,13 @@ $session = SessionWrapperFactory::getInstance()->getActiveSession();
 <br />
 <?php
 
-// set up the mysql collation string to ensure case is sensitive (or insensitive) in the mysql queries
+// Convert text to utf8mb4 before applying these collations to support legacy utf8mb3 columns.
 $case_sensitive_collation = "COLLATE utf8mb4_bin";
 $case_insensitive_collation = "COLLATE utf8mb4_general_ci";
 
 if (!empty($_POST['load'])) {
     CsrfUtils::checkCsrfInput(INPUT_POST, dieOnFail: true);
+    $go = 'no';
 
   // query for entering new definitions; uses cons_id because the constant already exists.
     if (!empty($_POST['cons_id'])) {
@@ -143,7 +144,7 @@ if (!empty($_POST['load'])) {
             $value = trim((string) $value);
 
             // only continue if the definition is new
-            $sql = "SELECT * FROM lang_definitions WHERE def_id=? AND definition " . $case_sensitive_collation . " =?";
+            $sql = "SELECT * FROM lang_definitions WHERE def_id=? AND CONVERT(definition USING utf8mb4) " . $case_sensitive_collation . " =?";
             $res_test = sqlStatement($sql, [$key, $value]);
             if (!sqlFetchArray($res_test)) {
                 // insert into the main language tables
@@ -190,7 +191,7 @@ if (!empty($_POST['edit'])) {
     "FROM lang_definitions AS ld " .
     "RIGHT JOIN ( lang_constants AS lc, lang_languages AS ll ) ON " .
     "( lc.cons_id = ld.cons_id AND ll.lang_id = ld.lang_id ) " .
-    "WHERE lc.constant_name " . $case_insensitive_collation . " LIKE ? AND ( ll.lang_id = 1 ";
+    "WHERE CONVERT(lc.constant_name USING utf8mb4) " . $case_insensitive_collation . " LIKE ? AND ( ll.lang_id = 1 ";
     if ($lang_id != 1) {
                 array_push($bind_sql_array, $lang_id);
         $sql .= "OR ll.lang_id=? ";
@@ -201,7 +202,7 @@ if (!empty($_POST['edit'])) {
     }
 
     // Sort same case together and English/null before other languages.
-    $sql .= ") ORDER BY lc.constant_name, BINARY lc.constant_name, ld.lang_id " . $case_insensitive_collation;
+    $sql .= ") ORDER BY CONVERT(lc.constant_name USING utf8mb4) " . $case_insensitive_collation . ", BINARY lc.constant_name, ld.lang_id";
 
     $res = sqlStatement($sql, $bind_sql_array);
 
