@@ -64,7 +64,9 @@ function collectLayoutNames($condition, $mapping = ''): void
 }
 /** @var array<string, array{string, mixed}> $layouts */
 $layouts = [];
-collectLayoutNames("grp_form_id NOT LIKE 'LBF%' AND grp_form_id NOT LIKE 'LBT%'", xl('Core'));
+// Only offer core layouts with a supported storage mapping in tableNameFromLayout().
+// Legacy form layouts and saved copies (for example DEM_SAVE) have no such mapping.
+collectLayoutNames("(grp_form_id IN ('DEM', 'SRH', 'CON', 'GCA', 'FACUSR') OR grp_form_id LIKE 'HIS%')", xl('Core'));
 collectLayoutNames("grp_form_id LIKE 'LBT%'", xl('Transactions'));
 collectLayoutNames("grp_form_id LIKE 'LBF%'", '');
 
@@ -427,7 +429,9 @@ natsort($sorted_datatypes);
 // The layout ID identifies the layout to be edited.
 // AI/Claude Code change: Validate against known layouts to prevent any tainted user input from propagating.
 $layout_id = empty($_REQUEST['layout_id']) ? '' : (string) $_REQUEST['layout_id'];
+$layoutSelectionWarning = null;
 if ($layout_id !== '' && !isset($layouts[$layout_id])) {
+    $layoutSelectionWarning = xl('The selected layout is not supported or is inactive. Please select an available layout.');
     $layout_id = '';
 }
 // End of AI/Claude Code change
@@ -1511,6 +1515,11 @@ function myChangeCheck() {
 </head>
 
 <body class="body_top admin-layout">
+<?php if ($layoutSelectionWarning !== null) { ?>
+<div class="alert alert-warning" role="alert">
+    <?php echo text($layoutSelectionWarning); ?>
+</div>
+<?php } ?>
 <?php if ($saveError !== null) { ?>
 <div class="alert alert-danger m-2" role="alert" id="layout-save-error">
     <?php echo text($saveError); ?>
