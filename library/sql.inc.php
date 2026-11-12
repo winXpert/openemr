@@ -532,7 +532,7 @@ function privStatement($sql, $params = null)
         echo "Failure during database access! Check server error log.";
         $backtrace = debug_backtrace();
 
-        error_log("Executing as user:" . errorLogEscape(getPrivDB()->user) . " Statement failed:" . errorLogEscape($sql) . ":" . errorLogEscape($GLOBALS['last_mysql_error'])
+        error_log("Executing as user:" . errorLogEscape(getPrivDB()->user) . " Statement failed:" . errorLogEscape($sql) . ":" . errorLogEscape(getPrivDB()->ErrorMsg())
             . "==>" . errorLogEscape($backtrace[1]["file"]) . " at " . errorLogEscape($backtrace[1]["line"]) . ":" . errorLogEscape($backtrace[1]["function"]));
         exit(1);
     }

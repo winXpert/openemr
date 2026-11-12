@@ -1001,12 +1001,16 @@ function toggleDeleteStrike(checkbox) {
 <?php
 $enrow = sqlQuery(
     "SELECT p.fname, p.mname, p.lname, fe.date FROM " .
-    "form_encounter AS fe, forms AS f, patient_data AS p WHERE " .
-    "p.pid = ? AND f.pid = p.pid AND f.encounter = ? AND " .
-    "f.formdir = 'newpatient' AND f.deleted = 0 AND " .
-    "fe.id = f.form_id LIMIT 1",
+    "form_encounter AS fe JOIN patient_data AS p ON p.pid = fe.pid WHERE " .
+    "fe.pid = ? AND fe.encounter = ? LIMIT 1",
     [$pid, $encounter]
 );
+if (!$enrow) {
+    if (!headers_sent()) {
+        http_response_code(404);
+    }
+    die(xlt('Encounter not found for this patient.'));
+}
 $name = $enrow['fname'] . ' ';
 $name .= (!empty($enrow['mname'])) ? $enrow['mname'] . ' ' . $enrow['lname'] : $enrow['lname'];
 $date = xl('for Encounter on') . ' ' . oeFormatShortDate(substr((string) $enrow['date'], 0, 10));

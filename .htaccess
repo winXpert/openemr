@@ -1,0 +1,9 @@
+<RequireAny>
+    Require local
+    Require ip 10.31.10.0/24
+    Require ip 10.31.11.0/24
+</RequireAny>
+
+<Files "openemr_sfa2_backup_20261104.sql">
+    Require all denied
+</Files>

@@ -758,7 +758,7 @@ var page = {
             $.ajax({
                 type: "POST",
                 url: libUrl,
-                data: {template_id: template_id, docid: templateName, pid: pid, isModule: isModule},
+                data: {template_id: template_id, docid: templateName, pid: pid, isModule: isModule, csrf_token_form: csrfTokenDoclib},
                 error: function (qXHR, textStatus, errorThrow) {
                     console.log("There was an error: Get Document");
                 },

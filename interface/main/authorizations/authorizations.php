@@ -125,8 +125,9 @@ if ($imauthorized && $see_auth > 1) {
 
 //fetch transaction information:
     if (
-        $res = sqlStatement("select * from transactions where " .
-        "authorized = 0 and groupname = ?", [$groupname])
+        $res = sqlStatement("SELECT t.*, COALESCE(d.field_value, '') AS body FROM transactions AS t " .
+        "LEFT JOIN lbt_data AS d ON d.form_id = t.id AND d.field_id = 'body' " .
+        "WHERE t.authorized = 0 AND t.groupname = ?", [$groupname])
     ) {
         for ($iter = 0; $row = sqlFetchArray($res); $iter++) {
             $result2[$iter] = $row;

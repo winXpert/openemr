@@ -494,12 +494,14 @@ if (!empty($formid)) {
 
 $enrow = sqlQuery(
     "SELECT p.fname, p.mname, p.lname, fe.date FROM " .
-    "form_encounter AS fe, forms AS f, patient_data AS p WHERE " .
-    "p.pid = ? AND f.pid = p.pid AND f.encounter = ? AND " .
-    "f.formdir = 'newpatient' AND f.deleted = 0 AND " .
-    "fe.id = f.form_id LIMIT 1",
+    "form_encounter AS fe JOIN patient_data AS p ON p.pid = fe.pid WHERE " .
+    "fe.pid = ? AND fe.encounter = ? LIMIT 1",
     [$pid, $encounter]
 );
+if (!$enrow) {
+    http_response_code(404);
+    die(xlt('Encounter not found for this patient.'));
+}
 
 $bill_type = $row['billing_type'] ?? '';
 $gbl_lab = get_lab_name($row['lab_id'] ?? '');
@@ -1173,11 +1175,20 @@ if (!empty($row['lab_id'])) {
 
         function createLabels(e) {
             e.preventDefault();
+            let f = document.forms[0];
+            let order = Number(f.id.value);
+            if (!Number.isInteger(order) || order <= 0) {
+                alert(<?php echo xlj('Please save the procedure order before printing labels.'); ?>);
+                return false;
+            }
+            if (!f['form_transport[0]']) {
+                alert(<?php echo xlj('Please select at least one test before printing labels.'); ?>);
+                return false;
+            }
             let prmt = <?php echo xlj("How many sets of specimen labels to create?"); ?> + "\n" + <?php echo xlj("Each test in order gets a label."); ?>;
             let count = prompt(prmt, '1');
             if (!count) return false;
             let tarray = "";
-            let f = document.forms[0];
             let transport = '';
             let i = 0;
             for (; f['form_transport[' + i + ']']; ++i) {
@@ -1187,7 +1198,6 @@ if (!empty($row['lab_id'])) {
             }
             let printer = 'file';
             let acctid = <?php echo js_escape($gbl_client_acct); ?>;
-            let order = f.id.value;
             let patient = <?php echo js_escape($patient['lname'] . ', ' . $patient['fname'] . ' ' . $patient['mname']); ?>;
             let dob = <?php echo js_escape($patient['DOB']); ?>;
             let pid = <?php echo js_escape($patient['pid']);  ?>;
@@ -1639,7 +1649,7 @@ $reasonCodeStatii[ReasonStatusCodes::NONE]['description'] = xl("Select a status 
                                     <a class='btn btn-success ml-1' href='#'
                                         onclick="createLabels(event, this)"><?php echo xlt('Labels'); ?></a>
                                     <?php
-                                    if ($row['order_psc'] && !$isDorn) { ?>
+                                    if (!empty($row['order_psc']) && !$isDorn) { ?>
                                         <button type="submit" class="btn btn-outline-primary btn-save"
                                             name='bn_save_ereq' id='bn_save_ereq' value="save_ereq"
                                             onclick='transmitting = false;'><?php echo xlt('Manual eREQ'); ?>

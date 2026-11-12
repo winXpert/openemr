@@ -20,34 +20,41 @@ use OpenEMR\Common\Acl\AccessDeniedHelper;
 use OpenEMR\Common\Acl\AclMain;
 use OpenEMR\Core\Header;
 
-$prow = getPatientData($pid, "squad, title, fname, mname, lname");
-
 // Check authorization.
 $thisauth = AclMain::aclCheckCore('patients', 'notes');
 if (!$thisauth) {
     AccessDeniedHelper::deny('Unauthorized access to patient notes print');
 }
 
-if ($prow['squad'] && ! AclMain::aclCheckCore('squads', $prow['squad'])) {
-    AccessDeniedHelper::deny('Not authorized for squad: ' . $prow['squad']);
+$noteid = (int) ($_REQUEST['noteid'] ?? 0);
+$nrow = $noteid > 0 ? getPnoteById($noteid, 'pid,title,assigned_to,activity,body') : false;
+if (empty($nrow)) {
+    http_response_code(404);
+    exit(xlt('Note not found.'));
 }
 
-$noteid = $_REQUEST['noteid'];
-
-$ptname = $prow['title'] . ' ' . $prow['fname'] . ' ' . $prow['mname'] .
-  ' ' . $prow['lname'];
-
-$title       = '';
-$assigned_to = '';
-$body        = '';
-$activity    = 0;
-if ($noteid) {
-    $nrow = getPnoteById($noteid, 'title,assigned_to,activity,body');
-    $title = $nrow['title'];
-    $assigned_to = $nrow['assigned_to'];
-    $activity = $nrow['activity'];
-    $body = $nrow['body'];
+// Printing from Messages does not require a patient selected in the session.
+// The note itself is the authoritative source of the patient association.
+$pid = (int) $nrow['pid'];
+$ptname = '';
+if ($pid > 0) {
+    $prow = getPatientData($pid, "squad, title, fname, mname, lname");
+    if (empty($prow)) {
+        http_response_code(404);
+        exit(xlt('Patient not found.'));
+    }
+    if ($prow['squad'] && !AclMain::aclCheckCore('squads', $prow['squad'])) {
+        AccessDeniedHelper::deny('Not authorized for squad: ' . $prow['squad']);
+    }
+    $ptname = trim($prow['title'] . ' ' . $prow['fname'] . ' ' . $prow['mname'] . ' ' . $prow['lname']);
+} elseif (!checkPnotesNoteId($noteid, $session->get('authUser'))) {
+    AccessDeniedHelper::deny('Message is not assigned to the current user');
 }
+
+$title = $nrow['title'];
+$assigned_to = $nrow['assigned_to'];
+$activity = $nrow['activity'];
+$body = $nrow['body'];
 ?>
 <html>
 <head>
@@ -58,8 +65,8 @@ if ($noteid) {
 
 <p><?php echo "<b>" .
   generate_display_field(['data_type' => '1','list_id' => 'note_type'], $title) .
-  "</b>" . ' ' . xlt('for') . ' ' .
-  "<b>" . attr($ptname) . "</b>"; ?></p>
+  "</b>" . ($ptname !== '' ? ' ' . xlt('for') . ' ' .
+  "<b>" . text($ptname) . "</b>" : ''); ?></p>
 
 <p><?php echo xlt('Assigned To'); ?>: <?php echo text($assigned_to); ?></p>
 

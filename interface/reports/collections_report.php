@@ -43,6 +43,17 @@ if (!AclMain::aclCheckCore('acct', 'rep_a')) {
     AccessDeniedHelper::denyWithTemplate("ACL check failed for acct/rep_a: Collections Report", xl("Collections Report"));
 }
 
+$selectionError = '';
+$_POST['form_cb'] = is_array($_POST['form_cb'] ?? null) ? array_filter(
+    $_POST['form_cb'],
+    static fn($value, $key): bool => $value === 'on' && preg_match('/^[0-9]+\.[0-9]+$/', (string) $key) === 1,
+    ARRAY_FILTER_USE_BOTH
+) : [];
+if ((!empty($_POST['form_export']) || !empty($_POST['form_csvexport'])) && $_POST['form_cb'] === []) {
+    $selectionError = xl('Please select at least one invoice before exporting or clearing insurance debt.');
+    $_POST['form_export'] = $_POST['form_csvexport'] = $_POST['form_clear_ins_debt'] = $_POST['form_refresh'] = '';
+}
+
 $alertmsg = '';
 $bgcolor = "#aaaaaa";
 $export_patient_count = 0;
@@ -55,6 +66,13 @@ $is_ins_summary = $form_category == 'Ins Summary';
 $is_due_ins     = ($form_category == 'Due Ins') || $is_ins_summary;
 $is_due_pt      = $form_category == 'Due Pt';
 $is_all         = $form_category == 'All';
+$collectionsPageSize = 100;
+$collectionsPage = filter_var($_POST['collections_page'] ?? 0, FILTER_VALIDATE_INT, [
+    'options' => ['min_range' => 0, 'max_range' => intdiv(PHP_INT_MAX, $collectionsPageSize) - 1]
+]) ?: 0;
+$paginateCollections = $is_all && empty($_POST['form_export']) && empty($_POST['form_csvexport']);
+$collectionsHasNextPage = false;
+$collectionsTotalEntries = 0;
 // $is_ageby_lad = is aged by last active date which is determined to be either the dos,
 // the last payment date or the last statement date applied by statement.inc.php
 $is_ageby_lad   = str_contains(($_POST['form_ageby'] ?? ''), 'Last');
@@ -154,7 +172,7 @@ if ($form_cb_city) {
     ++$initial_colspan;
 }
 
-if ($form_cb_ins1) {
+if ($form_cb_ins1 || $form_payer_id) {
     ++$initial_colspan;
 }
 
@@ -163,10 +181,6 @@ if ($form_cb_referrer) {
 }
 
 if ($form_provider) {
-    ++$initial_colspan;
-}
-
-if ($form_payer_id) {
     ++$initial_colspan;
 }
 
@@ -182,6 +196,7 @@ for ($c = 0; $c < $form_age_cols; ++$c) {
 
 function endPatient($ptrow): void
 {
+    global $paginateCollections;
     global $export_patient_count, $export_dollars, $bgcolor;
     global $grand_total_charges, $grand_total_adjustments, $grand_total_paid;
     global $grand_total_agedbal, $is_due_ins, $form_age_cols;
@@ -231,10 +246,11 @@ function endPatient($ptrow): void
             /***************************************************************
           echo "  <td class='detail' colspan='$initial_colspan'>";
           echo "&nbsp;</td>\n";
-          echo "  <td class='detotal' colspan='$final_colspan'>&nbsp;Total Patient Balance:</td>\n";
+          echo "  <td class='detotal' colspan='$final_colspan'>&nbsp;" .
+              ($paginateCollections ? xlt('Patient Balance on This Page') : xlt('Total Patient Balance')) . ":</td>\n";
             ***************************************************************/
             echo "  <td class='detotal' colspan='" . attr(($initial_colspan + $final_colspan)) .
-            "'>&nbsp;" . xlt('Total Patient Balance') . ":</td>\n";
+            "'>&nbsp;" . ($paginateCollections ? xlt('Patient Balance on This Page') : xlt('Total Patient Balance')) . ":</td>\n";
             /**************************************************************/
             if ($form_age_cols) {
                 for ($c = 0; $c < $form_age_cols; ++$c) {
@@ -294,7 +310,7 @@ function endInsurance($insrow): void
         if ($form_age_cols) {
             for ($c = 0; $c < $form_age_cols; ++$c) {
                 echo "  <td class='detotal' align='left'>&nbsp;" .
-                text(oeFormatMoney($insrow['agedbal'][$c])) . "&nbsp;</td>\n";
+                text(oeFormatMoney($insrow['agedbal'][$c] ?? 0)) . "&nbsp;</td>\n";
             }
         } else {
             echo "  <td class='detotal' align='left'>&nbsp;" .
@@ -308,14 +324,18 @@ function endInsurance($insrow): void
     $grand_total_adjustments += $insrow['adjustments'];
     $grand_total_paid        += $insrow['paid'];
     for ($c = 0; $c < $form_age_cols; ++$c) {
-        $grand_total_agedbal[$c] += $insrow['agedbal'][$c];
+        $grand_total_agedbal[$c] += $insrow['agedbal'][$c] ?? 0;
     }
 }
 
 function getInsName($payerid)
 {
-    $tmp = sqlQuery("SELECT name FROM insurance_companies WHERE id = ? ", [$payerid]);
-    return $tmp['name'];
+    static $names = [];
+    if (!array_key_exists($payerid, $names)) {
+        $tmp = sqlQuery("SELECT name FROM insurance_companies WHERE id = ? ", [$payerid]);
+        $names[$payerid] = $tmp['name'] ?? '';
+    }
+    return $names[$payerid];
 }
 
 $ins_co_name = '';
@@ -366,7 +386,40 @@ if (!empty($_POST['form_csvexport'])) {
     <?php Header::setupHeader(['datetime-picker', 'report-helper']); ?>
 
     <style>
+        .collections-loading {
+            position: fixed;
+            inset: 0;
+            z-index: 2000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, .85);
+            cursor: progress;
+        }
+        .collections-loading[hidden] { display: none; }
+        .collections-loading-panel {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin: 16px;
+            padding: 22px 28px;
+            border: 1px solid var(--gray-300, #dee2e6);
+            border-radius: 12px;
+            background: var(--white, #fff);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, .1);
+        }
+        .collections-spinner {
+            flex: 0 0 28px;
+            height: 28px;
+            border: 3px solid var(--gray-300, #dee2e6);
+            border-top-color: var(--primary, #007bff);
+            border-radius: 50%;
+            animation: collections-spin .8s linear infinite;
+        }
+        @keyframes collections-spin { to { transform: rotate(360deg); } }
+        @media (prefers-reduced-motion: reduce) { .collections-spinner { animation: none; } }
         @media print {
+            .collections-loading { display: none; }
             #report_parameters {
                 visibility: hidden;
                 display: none;
@@ -390,12 +443,61 @@ if (!empty($_POST['form_csvexport'])) {
     </style>
 
     <script>
+        $(function () {
+            var collectionsLoading = false;
+            var collectionsSubmitTimer;
+            function resetCollectionsLoading() {
+                clearTimeout(collectionsSubmitTimer);
+                collectionsLoading = false;
+                $('#collections-loading').prop('hidden', true);
+                $('#theform').attr('aria-busy', 'false');
+                $('#collections-submit').prop('disabled', false);
+            }
+            resetCollectionsLoading();
+            $(window).on('pageshow', resetCollectionsLoading);
+            $('#theform').on('submit', function (event) {
+                if (event.isDefaultPrevented()) {
+                    return;
+                }
+                if (collectionsLoading) {
+                    event.preventDefault();
+                    return;
+                }
+                // Downloads do not replace the page, so they must not leave an overlay behind.
+                if ($('#form_csvexport').val() || $('#form_export').val()) {
+                    var selectedInvoices = $('#theform input[type="checkbox"]:checked').filter(function () {
+                        return this.name.indexOf('form_cb[') === 0;
+                    });
+                    if (!selectedInvoices.length) {
+                        event.preventDefault();
+                        $('#form_csvexport, #form_export, #form_clear_ins_debt').val('');
+                        alert(<?php echo xlj('Please select at least one invoice before exporting or clearing insurance debt.'); ?>);
+                    }
+                    return;
+                }
+                event.preventDefault();
+                collectionsLoading = true;
+                $('#collections-loading').prop('hidden', false);
+                $('#theform').attr('aria-busy', 'true');
+                $('#collections-submit').prop('disabled', true);
+                var form = this;
+                // Let the spinner paint before starting the request.
+                collectionsSubmitTimer = setTimeout(function () {
+                    HTMLFormElement.prototype.submit.call(form);
+                }, 50);
+            });
+        });
+
         function reSubmit() {
             $("#form_refresh").attr("value","true");
             $("#form_export").val("");
             $("#form_csvexport").val("");
             $("#form_clear_ins_debt").val("");
             $("#theform").submit();
+        }
+        function collectionsGoToPage(page) {
+            $('#collections_page').val(page);
+            reSubmit();
         }
         // open dialog to edit an invoice w/o opening encounter.
         function editInvoice(e, id) {
@@ -452,14 +554,29 @@ if (!empty($_POST['form_csvexport'])) {
 
 <body class="body_top">
 
+<div id="collections-loading" class="collections-loading" role="status" aria-live="polite"<?php echo empty($_POST['form_refresh']) || !empty($_POST['form_export']) ? ' hidden' : ''; ?>>
+    <div class="collections-loading-panel">
+        <span class="collections-spinner" aria-hidden="true"></span>
+        <div>
+            <strong><?php echo xlt('Loading collections report...'); ?></strong>
+            <div class="text-muted small"><?php echo xlt('Please wait...'); ?></div>
+        </div>
+    </div>
+</div>
+
 <span class='title'><?php echo xlt('Report'); ?> - <?php echo xlt('Collections'); ?></span>
+
+<?php if ($selectionError !== '') { ?>
+<div class="alert alert-warning" role="alert"><?php echo text($selectionError); ?></div>
+<?php } ?>
 
 <form method='post' action='collections_report.php' enctype='multipart/form-data' id='theform' onsubmit='return top.restoreSession()'>
 <input type="hidden" name="csrf_token_form" value="<?php echo CsrfUtils::collectCsrfToken(session: $session); ?>" />
 
 <div id="report_parameters">
 
-<input type='hidden' name='form_refresh' id='form_refresh' value=''/>
+<input type='hidden' name='form_refresh' id='form_refresh' value='true'/>
+<input type='hidden' name='collections_page' id='collections_page' value='<?php echo attr($collectionsPage); ?>'/>
 <input type='hidden' name='form_export' id='form_export' value=''/>
 <input type='hidden' name='form_csvexport' id='form_csvexport' value=''/>
 <input type='hidden' name='form_page_y' id='form_page_y' value='<?php echo attr($form_page_y); ?>'/>
@@ -676,9 +793,9 @@ if (!empty($_POST['form_csvexport'])) {
             <td>
                 <div class="text-center">
           <div class="btn-group" role="group">
-                      <a href='#' class='btn btn-secondary btn-save' onclick='$("#form_refresh").attr("value","true"); $("#form_csvexport").val(""); $("#form_export").val(""); $("#form_clear_ins_debt").val(""); $("#theform").submit();'>
+                      <button type='submit' id='collections-submit' class='btn btn-secondary btn-save' onclick='$("#collections_page").val("0"); $("#form_csvexport").val(""); $("#form_export").val(""); $("#form_clear_ins_debt").val("");'>
                             <?php echo xlt('Submit'); ?>
-                      </a>
+                      </button>
                         <?php if (!empty($_POST['form_refresh'])) { ?>
                         <a href='#' class='btn btn-secondary btn-print' onclick='window.print()'>
                                 <?php echo xlt('Print'); ?>
@@ -758,6 +875,164 @@ if (!empty($_POST['form_refresh']) || !empty($_POST['form_export']) || !empty($_
         $where = "1 = 1";
     }
 
+    // Apply the existing balance filters before buffering encounters in PHP.
+    $balanceSql = "ROUND(SUM(charges) + SUM(copays) + SUM(sales) - SUM(payments) - SUM(adjustments), 2)";
+    $balanceFilters = [];
+    if ($form_cb_with_debt) {
+        $balanceFilters[] = "$balanceSql > 0";
+    }
+    if (!empty($_POST['form_refresh']) && !$is_all) {
+        $balanceFilters[] = "$balanceSql != 0";
+    }
+    if ($form_category == 'Credits') {
+        $balanceFilters[] = "$balanceSql <= 0";
+    }
+    if ($form_payer_id) {
+        if ($ins_co_name !== '') {
+            // Resolve equivalent insurer names once, rather than once per encounter.
+            $payerResult = sqlStatement("SELECT id FROM insurance_companies WHERE BINARY name = BINARY ?", [$ins_co_name]);
+            $payerIds = [];
+            while ($payerRow = sqlFetchArray($payerResult)) {
+                $payerIds[] = (int) $payerRow['id'];
+            }
+            if (!$payerIds) {
+                $where .= " AND 1 = 0";
+            }
+            $payerIdList = implode(',', $payerIds ?: [0]);
+            // provider is a varchar column. Resolve its stored spellings once so
+            // string-bound lookups can use its index without changing numeric ID matching.
+            $providerResult = sqlStatement("SELECT DISTINCT provider FROM insurance_data WHERE provider IN ($payerIdList)");
+            $providerValues = [];
+            while ($providerRow = sqlFetchArray($providerResult)) {
+                $providerValues[] = (string) $providerRow['provider'];
+            }
+            if (!$providerValues) {
+                $where .= " AND 1 = 0";
+            }
+            $providerValues = $providerValues ?: [''];
+            $providerPlaceholders = implode(',', array_fill(0, count($providerValues), '?'));
+            $where .= " AND EXISTS (SELECT 1 FROM insurance_data AS matching_ins " .
+                "WHERE matching_ins.pid = f.pid AND matching_ins.type = 'primary' " .
+                "AND matching_ins.provider IN ($providerPlaceholders) " .
+                "AND (matching_ins.date <= DATE(f.date) OR matching_ins.date IS NULL) " .
+                "AND (matching_ins.date_end >= DATE(f.date) OR matching_ins.date_end IS NULL) " .
+                "AND NOT EXISTS (SELECT 1 FROM insurance_data AS newer_ins " .
+                "WHERE newer_ins.pid = matching_ins.pid AND newer_ins.type = 'primary' " .
+                "AND (newer_ins.date > matching_ins.date OR (matching_ins.date IS NULL AND newer_ins.date IS NOT NULL)) " .
+                "AND newer_ins.date <= DATE(f.date) " .
+                "AND (newer_ins.date_end >= DATE(f.date) OR newer_ins.date_end IS NULL)) " .
+                // Nullable effective dates can tie despite the unique pid/type/date index.
+                "AND (matching_ins.date IS NOT NULL OR matching_ins.provider = " .
+                "(SELECT ins.provider FROM insurance_data AS ins WHERE ins.pid = f.pid AND ins.type = 'primary' " .
+                "AND (ins.date <= DATE(f.date) OR ins.date IS NULL) " .
+                "AND (ins.date_end >= DATE(f.date) OR ins.date_end IS NULL) " .
+                "ORDER BY ins.date DESC LIMIT 1)))";
+            array_push($sqlArray, ...$providerValues);
+        } else {
+            // An empty insurer name also matches encounters without primary insurance.
+            $where .= " AND BINARY COALESCE((SELECT ic.name FROM insurance_companies AS ic WHERE ic.id = " .
+                "(SELECT ins.provider FROM insurance_data AS ins WHERE ins.pid = f.pid AND ins.type = 'primary' " .
+                "AND (ins.date <= DATE(f.date) OR ins.date IS NULL) " .
+                "AND (ins.date_end >= DATE(f.date) OR ins.date_end IS NULL) " .
+                "ORDER BY ins.date DESC LIMIT 1)), '') = BINARY ?";
+            $sqlArray[] = $ins_co_name;
+        }
+    }
+
+    $transactionScope = '';
+    $collectionsPagePrepared = false;
+    if ($paginateCollections && !$balanceFilters) {
+        // Choose the page using encounter indexes before joining transaction history.
+        $candidateFromSql = "FROM form_encounter AS f JOIN patient_data AS p ON p.pid = f.pid WHERE $where";
+        $useWindowCount = false;
+        if ($form_payer_id) {
+            // Avoid evaluating effective-date coverage twice for count and page.
+            $serverVersion = sqlQuery("SELECT VERSION() AS server_version")['server_version'] ?? '';
+            if (stripos($serverVersion, 'MariaDB') !== false) {
+                preg_match('/(\d+\.\d+\.\d+)-MariaDB/i', $serverVersion, $versionParts);
+                $useWindowCount = version_compare($versionParts[1] ?? '0', '10.2.0', '>=');
+            } else {
+                $useWindowCount = version_compare($serverVersion, '8.0.0', '>=');
+            }
+        }
+        if (!$useWindowCount) {
+            $countRow = sqlQuery("SELECT COUNT(*) AS entry_count " . $candidateFromSql, $sqlArray);
+            $collectionsTotalEntries = (int) ($countRow['entry_count'] ?? 0);
+            $lastPage = max(0, (int) ceil($collectionsTotalEntries / $collectionsPageSize) - 1);
+            $collectionsPage = min($collectionsPage, $lastPage);
+        }
+        $pageSelect = "SELECT f.id, f.pid " . ($useWindowCount ? ", COUNT(*) OVER() AS entry_count " : '') . $candidateFromSql;
+        $pageResult = sqlStatement(
+            $pageSelect . " ORDER BY f.pid, f.encounter LIMIT " .
+            ($collectionsPageSize + 1) . " OFFSET " . ($collectionsPage * $collectionsPageSize),
+            $sqlArray
+        );
+        $pageRows = [];
+        while ($pageRow = sqlFetchArray($pageResult)) {
+            $pageRows[] = $pageRow;
+            if ($useWindowCount) {
+                $collectionsTotalEntries = (int) $pageRow['entry_count'];
+            }
+        }
+        if ($useWindowCount && !$pageRows && $collectionsPage > 0) {
+            // An out-of-range page has no window row carrying the total.
+            $countRow = sqlQuery("SELECT COUNT(*) AS entry_count " . $candidateFromSql, $sqlArray);
+            $collectionsTotalEntries = (int) ($countRow['entry_count'] ?? 0);
+            $collectionsPage = max(0, (int) ceil($collectionsTotalEntries / $collectionsPageSize) - 1);
+            $pageResult = sqlStatement($pageSelect . " ORDER BY f.pid, f.encounter LIMIT " .
+                ($collectionsPageSize + 1) . " OFFSET " . ($collectionsPage * $collectionsPageSize), $sqlArray);
+            while ($pageRow = sqlFetchArray($pageResult)) {
+                $pageRows[] = $pageRow;
+            }
+        }
+        $pageIds = [];
+        $pagePatients = [];
+        foreach ($pageRows as $pageRow) {
+            $pageIds[] = (int) $pageRow['id'];
+            $pagePatients[(int) $pageRow['pid']] = (int) $pageRow['pid'];
+        }
+        // These IDs are integer-cast database values, never interpolated request text.
+        $transactionScope = " AND pid IN (" . implode(',', $pagePatients ?: [0]) . ")";
+        $where = $pageIds ? "f.id IN (" . implode(',', array_fill(0, count($pageIds), '?')) . ")" : '1 = 0';
+        $sqlArray = $pageIds;
+        $collectionsPagePrepared = true;
+    }
+
+    // Read each transaction source once. Filter balances inside the aggregate so
+    // nonmatching encounters never require patient joins or invoice-detail queries.
+    $ledgerSql = "SELECT pid, encounter, SUM(charges) AS charges, SUM(copays) AS copays, " .
+        "SUM(sales) AS sales, SUM(payments) AS payments, SUM(adjustments) AS adjustments, " .
+        "SUM(detail_count) AS detail_count FROM (" .
+        "SELECT pid, encounter, " .
+        "SUM(CASE WHEN code_type != 'COPAY' THEN COALESCE(fee, 0) ELSE 0 END) AS charges, " .
+        "SUM(CASE WHEN code_type = 'COPAY' THEN COALESCE(fee, 0) ELSE 0 END) AS copays, " .
+        "0 AS sales, 0 AS payments, 0 AS adjustments, SUM(CASE WHEN fee != 0 THEN 1 ELSE 0 END) AS detail_count " .
+        "FROM billing WHERE activity = 1 $transactionScope GROUP BY pid, encounter " .
+        "UNION ALL SELECT pid, encounter, 0, 0, COALESCE(SUM(fee), 0), 0, 0, " .
+        "SUM(CASE WHEN fee != 0 THEN 1 ELSE 0 END) " .
+        "FROM drug_sales WHERE 1 = 1 $transactionScope GROUP BY pid, encounter " .
+        "UNION ALL SELECT pid, encounter, 0, 0, 0, COALESCE(SUM(pay_amount), 0), " .
+        "COALESCE(SUM(adj_amount), 0), COUNT(*) " .
+        "FROM ar_activity WHERE deleted IS NULL $transactionScope GROUP BY pid, encounter" .
+        ") AS transactions GROUP BY pid, encounter";
+    // A zero balance can match a Credits export when refresh is absent.
+    $requireLedger = $form_cb_with_debt || (!empty($_POST['form_refresh']) && !$is_all);
+    if ($requireLedger) {
+        $ledgerSql .= " HAVING " . implode(' AND ', $balanceFilters);
+    } elseif ($balanceFilters) {
+        $where .= " AND ROUND(COALESCE(totals.charges, 0) + COALESCE(totals.copays, 0) + " .
+            "COALESCE(totals.sales, 0) - COALESCE(totals.payments, 0) - COALESCE(totals.adjustments, 0), 2) <= 0";
+    }
+    $collectionsCandidateSql = $requireLedger
+        ? "FROM (" . $ledgerSql . ") AS totals STRAIGHT_JOIN form_encounter AS f " .
+            "ON f.pid = totals.pid AND f.encounter = totals.encounter " .
+            "JOIN patient_data AS p ON p.pid = f.pid "
+        : "FROM form_encounter AS f JOIN patient_data AS p ON p.pid = f.pid " .
+            "LEFT JOIN (" . $ledgerSql . ") AS totals ON totals.pid = f.pid AND totals.encounter = f.encounter ";
+    $collectionsFromSql = $collectionsCandidateSql .
+      "LEFT OUTER JOIN users AS u ON u.id = p.ref_providerID " .
+      "LEFT OUTER JOIN users AS w ON w.id = f.provider_id WHERE $where ";
+
     # added provider from encounter to the query (TLH)
     $query = "SELECT f.id, f.date, f.pid, CONCAT(w.lname, ', ', w.fname) AS provider_id, f.encounter, f.last_level_billed, " .
       "f.last_level_closed, f.last_stmt_date, f.stmt_count, f.invoice_refno, f.in_collection, " .
@@ -767,31 +1042,40 @@ if (!empty($_POST['form_refresh']) || !empty($_POST['form_export']) || !empty($_
       "( SELECT bill_date FROM billing AS b WHERE " .
       "b.pid = f.pid AND b.encounter = f.encounter AND " .
       "b.activity = 1 AND b.code_type != 'COPAY' LIMIT 1) AS bill_date, " .
-      "( SELECT SUM(b.fee) FROM billing AS b WHERE " .
-      "b.pid = f.pid AND b.encounter = f.encounter AND " .
-      "b.activity = 1 AND b.code_type != 'COPAY' ) AS charges, " .
-      "( SELECT SUM(b.fee) FROM billing AS b WHERE " .
-      "b.pid = f.pid AND b.encounter = f.encounter AND " .
-      "b.activity = 1 AND b.code_type = 'COPAY' ) AS copays, " .
-      "( SELECT SUM(s.fee) FROM drug_sales AS s WHERE " .
-      "s.pid = f.pid AND s.encounter = f.encounter ) AS sales, " .
-      "( SELECT SUM(a.pay_amount) FROM ar_activity AS a WHERE " .
-      "a.pid = f.pid AND a.encounter = f.encounter AND a.deleted IS NULL) AS payments, " .
-      "( SELECT SUM(a.adj_amount) FROM ar_activity AS a WHERE " .
-      "a.pid = f.pid AND a.encounter = f.encounter AND a.deleted IS NULL) AS adjustments " .
-      "FROM form_encounter AS f " .
-      "JOIN patient_data AS p ON p.pid = f.pid " .
-      "LEFT OUTER JOIN users AS u ON u.id = p.ref_providerID " .
-      "LEFT OUTER JOIN users AS w ON w.id = f.provider_id " .
-      "WHERE $where " .
-      "ORDER BY f.pid, f.encounter";
+      "totals.charges, totals.copays, totals.sales, totals.payments, totals.adjustments, totals.detail_count " .
+      $collectionsFromSql . "ORDER BY f.pid, f.encounter";
 
+    if ($paginateCollections) {
+        if (!$collectionsPagePrepared) {
+            // Debt filtering must evaluate balances before selecting the page.
+            $countRow = sqlQuery("SELECT COUNT(*) AS entry_count " . $collectionsCandidateSql . "WHERE $where", $sqlArray);
+            $collectionsTotalEntries = (int) ($countRow['entry_count'] ?? 0);
+            $lastPage = max(0, (int) ceil($collectionsTotalEntries / $collectionsPageSize) - 1);
+            $collectionsPage = min($collectionsPage, $lastPage);
+            $query .= " LIMIT " . ($collectionsPageSize + 1) . " OFFSET " . ($collectionsPage * $collectionsPageSize);
+        }
+        // Keep the submitted page synchronized if filters reduced the number of pages.
+        echo "<script>document.getElementById('collections_page').value = " . js_escape($collectionsPage) . ";</script>";
+    }
     $eres = sqlStatement($query, $sqlArray);
 
     $invlines = [];
     $ins_id = 0;
     $insposition = 0;
+    $collectionsPayerCache = [];
+    $getCollectionsPayer = static function ($patientId, $serviceDate, $level) use (&$collectionsPayerCache) {
+        $key = $patientId . '|' . $serviceDate . '|' . $level;
+        if (!array_key_exists($key, $collectionsPayerCache)) {
+            $collectionsPayerCache[$key] = SLEOB::arGetPayerID($patientId, $serviceDate, $level);
+        }
+        return $collectionsPayerCache[$key];
+    };
+    $collectionsRowCount = 0;
     while ($erow = sqlFetchArray($eres)) {
+        if ($paginateCollections && $collectionsRowCount++ >= $collectionsPageSize) {
+            $collectionsHasNextPage = true;
+            break;
+        }
         $patient_id = $erow['pid'];
         $encounter_id = $erow['encounter'];
         $pt_balance = $erow['charges'] + $erow['sales'] + $erow['copays'] - $erow['payments'] - $erow['adjustments'];
@@ -827,7 +1111,7 @@ if (!empty($_POST['form_refresh']) || !empty($_POST['form_export']) || !empty($_
         $insname = '';
         if (!$duncount) {
             for ($i = 1; $i <= 3; ++$i) {
-                $tmp = SLEOB::arGetPayerID($patient_id, $svcdate, $i);
+                $tmp = $getCollectionsPayer($patient_id, $svcdate, $i);
                 if (empty($tmp)) {
                     break;
                 }
@@ -887,7 +1171,7 @@ if (!empty($_POST['form_refresh']) || !empty($_POST['form_export']) || !empty($_
             $row['ins1'] = $insname;
         } else {
             if (empty($payerids)) {
-                $tmp = SLEOB::arGetPayerID($patient_id, $svcdate, 1);
+                $tmp = $getCollectionsPayer($patient_id, $svcdate, 1);
                 if (!empty($tmp)) {
                     $payerids[] = $tmp;
                 }
@@ -901,7 +1185,8 @@ if (!empty($_POST['form_refresh']) || !empty($_POST['form_export']) || !empty($_
         // This computes the invoice's total original charges and adjustments,
         // date of last activity, and determines if insurance has responded to
         // all billing items.
-        $invlines = InvoiceSummary::arGetInvoiceSummary($patient_id, $encounter_id, true);
+        $invlines = !empty($erow['detail_count'])
+            ? InvoiceSummary::arGetInvoiceSummary($patient_id, $encounter_id, true) : [];
 
         $row['charges'] = 0;
         $row['adjustments'] = 0;
@@ -960,19 +1245,17 @@ if (!empty($_POST['form_refresh']) || !empty($_POST['form_export']) || !empty($_
         }
 
         // Look up insurance policy number if we need it.
-        if ($form_cb_policy) {
+        if ($form_cb_policy || $form_cb_group_number) {
             $instype = ($insposition == 2) ? 'secondary' : (($insposition == 3) ? 'tertiary' : 'primary');
-            $insrow = sqlQuery("SELECT policy_number FROM insurance_data WHERE " .
+            $insrow = sqlQuery("SELECT policy_number, group_number FROM insurance_data WHERE " .
             "pid = ? AND type = ? AND (date <= ? OR date IS NULL) " .
             "ORDER BY date DESC LIMIT 1", [$patient_id, $instype, $svcdate]);
-            $row['policy'] = $insrow['policy_number'] ?? '';
-        }
-        if ($form_cb_group_number) {
-            $instype = ($insposition == 2) ? 'secondary' : (($insposition == 3) ? 'tertiary' : 'primary');
-            $insrow = sqlQuery("SELECT group_number FROM insurance_data WHERE " .
-            "pid = ? AND type = ? AND (date <= ? OR date IS NULL) " .
-            "ORDER BY date DESC LIMIT 1", [$patient_id, $instype, $svcdate]);
-            $row['groupnumber'] = $insrow['group_number'];
+            if ($form_cb_policy) {
+                $row['policy'] = $insrow['policy_number'] ?? '';
+            }
+            if ($form_cb_group_number) {
+                $row['groupnumber'] = $insrow['group_number'] ?? '';
+            }
         }
 
 
@@ -990,6 +1273,22 @@ if (!empty($_POST['form_refresh']) || !empty($_POST['form_export']) || !empty($_
     }
 
     ksort($rows);
+
+    if (!empty($rows) && empty($_POST['form_export']) && empty($_POST['form_csvexport'])) {
+        echo "<p class='text-muted' role='status'>" .
+            ($paginateCollections ? xlt('Invoices on this page') : xlt('Matching invoices in the available billing data')) . ': ' . text(count($rows));
+        if (!$is_all) {
+            echo '. ' . xlt('Zero-balance encounters are excluded.');
+        }
+        echo "</p>";
+    }
+
+    if (empty($rows) && empty($_POST['form_export']) && empty($_POST['form_csvexport'])) {
+        echo "<div class='alert alert-info' role='status'>" .
+            xlt('No invoices match the selected filters.') . ' ' .
+            xlt('Open excludes zero balances. Select All with a service date range to include zero-balance encounters, or adjust the other filters.') .
+            "</div>";
+    }
 
     if ($_POST['form_export']) {
         echo "<textarea rows='35' cols='100' readonly>";
@@ -1156,7 +1455,7 @@ if (!empty($_POST['form_refresh']) || !empty($_POST['form_export']) || !empty($_
                 $ptrow[$key] = $value;
             }
 
-            $ptrow['agedbal'] = [];
+            $ptrow['agedbal'] = array_fill(0, $form_age_cols, 0);
         } elseif (!$is_ins_summary && ($insname != $ptrow['insname'] || $pid != $ptrow['pid'])) {
             // For the report, this will write the patient totals.  For the
             // collections export this writes everything for the patient:
@@ -1167,7 +1466,7 @@ if (!empty($_POST['form_refresh']) || !empty($_POST['form_export']) || !empty($_
                 $ptrow[$key] = $value;
             }
 
-            $ptrow['agedbal'] = [];
+            $ptrow['agedbal'] = array_fill(0, $form_age_cols, 0);
         } else {
             $ptrow['amount']      += $row['amount'];
             $ptrow['paid']        += $row['paid'];
@@ -1404,12 +1703,12 @@ if (!empty($_POST['form_refresh']) || !empty($_POST['form_export']) || !empty($_
     } else {
         echo " <tr class='bg-white'>\n";
         if ($is_ins_summary) {
-            echo "  <td class='dehead'>&nbsp;" . xlt('Report Totals') . ":</td>\n";
+            echo "  <td class='dehead'>&nbsp;" . ($paginateCollections ? xlt('Page Totals') : xlt('Report Totals')) . ":</td>\n";
         } else {
             echo "  <td class='detail' colspan='" . attr($initial_colspan) . "'>\n";
             echo "   &nbsp;</td>\n";
             echo "  <td class='dehead' colspan='" . attr($final_colspan - 3) .
-            "'>&nbsp;" . xlt('Report Totals') . ":</td>\n";
+            "'>&nbsp;" . ($paginateCollections ? xlt('Page Totals') : xlt('Report Totals')) . ":</td>\n";
         }
 
         echo "  <td class='dehead' align='left'>&nbsp;" .
@@ -1444,6 +1743,27 @@ if (!empty($_POST['form_refresh']) || !empty($_POST['form_export']) || !empty($_
         echo " </tr>\n";
         echo "</table>\n";
         echo "</div>\n";
+    }
+    if ($paginateCollections) {
+        $entryStart = count($rows) > 0 ? $collectionsPage * $collectionsPageSize + 1 : 0;
+        $entryEnd = count($rows) > 0 ? min($collectionsTotalEntries, $collectionsPage * $collectionsPageSize + count($rows)) : 0;
+        ?>
+        <div class="my-3">
+            <p class="text-muted small" role="status"><?php
+                echo text(sprintf(
+                    xl('Showing %1$s to %2$s of %3$s entries'),
+                    number_format($entryStart),
+                    number_format($entryEnd),
+                    number_format($collectionsTotalEntries)
+                ));
+            ?></p>
+            <nav class="d-flex align-items-center justify-content-between" aria-label="<?php echo xla('Collections report pagination'); ?>">
+                <button type="button" class="btn btn-secondary" onclick="collectionsGoToPage(<?php echo attr($collectionsPage - 1); ?>)"<?php echo $collectionsPage === 0 ? ' disabled' : ''; ?>><?php echo xlt('Previous'); ?></button>
+                <span class="mx-2"><?php echo xlt('Page'); ?> <?php echo text($collectionsPage + 1); ?></span>
+                <button type="button" class="btn btn-secondary" onclick="collectionsGoToPage(<?php echo attr($collectionsPage + 1); ?>)"<?php echo !$collectionsHasNextPage ? ' disabled' : ''; ?>><?php echo xlt('Next'); ?></button>
+            </nav>
+        </div>
+        <?php
     }
 } // end if form_refresh
 

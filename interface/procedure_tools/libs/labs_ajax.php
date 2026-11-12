@@ -30,10 +30,10 @@ if (!AclMain::aclCheckCore('patients', 'med')) {
     AccessDeniedHelper::denyWithTemplate("ACL check failed for patients/med: Labs Ajax", xl("Labs"));
 }
 
-function orderDate($order)
+function orderDate($order, $pid)
 {
-    $sql = "SELECT DATE_FORMAT(date_ordered, '%m/%d/%Y') AS date_ordered FROM procedure_order WHERE procedure_order_id = ? ";
-    return sqlQuery($sql, [$order]);
+    $sql = "SELECT DATE_FORMAT(date_ordered, '%m/%d/%Y') AS date_ordered FROM procedure_order WHERE procedure_order_id = ? AND patient_id = ?";
+    return sqlQuery($sql, [$order, $pid]);
 }
 
 $action = $_GET['action'];
@@ -79,14 +79,26 @@ if ($action === 'print_labels') {
     if ($pid <= 0) {
         (new RequestTerminator())->error(Response::HTTP_BAD_REQUEST, 'Missing PID.');
     }
-    $order = $_GET['order'];
+    $order = $query->getInt('order');
+    if ($order <= 0) {
+        (new RequestTerminator())->error(Response::HTTP_BAD_REQUEST, xl('Please save the procedure order before printing labels.'));
+    }
     $specimen = [];
     // createLabels() in interface/forms/procedure_order/common.php appends a
     // trailing `;` after each specimen, so strip it before splitting to avoid
     // an empty tail element inflating the bound-check count.
-    $specimens = explode(";", rtrim((string) $_GET['specimen'], ";"));
+    $specimens = array_values(array_filter(
+        explode(";", rtrim((string) ($_GET['specimen'] ?? ''), ";")),
+        static fn(string $value): bool => trim($value) !== ''
+    ));
+    if ($specimens === []) {
+        (new RequestTerminator())->error(Response::HTTP_BAD_REQUEST, xl('Please select at least one test before printing labels.'));
+    }
     $patient = strtoupper((string) $_GET['patient']);
-    $order_date = orderDate($order);
+    $order_date = orderDate($order, $pid);
+    if (!$order_date) {
+        (new RequestTerminator())->error(Response::HTTP_NOT_FOUND, xl('Procedure order not found for this patient.'));
+    }
     $dob = $_GET['dob'];
     $count = $query->getInt('count') ?: 1;
 
@@ -95,7 +107,8 @@ if ($action === 'print_labels') {
     $maxTotalLabels = 500;
     $specimenCount = count($specimens);
     if (
-        $count > $maxCount
+        $count < 1
+        || $count > $maxCount
         || $specimenCount > $maxSpecimens
         || ($count * $specimenCount) > $maxTotalLabels
     ) {
@@ -106,14 +119,14 @@ if ($action === 'print_labels') {
         'tempDir' => (new CacheDirectory())->for('openemr-mpdf'),
         'mode' => 'utf-8',
         'format' => [45, 19],
-        'default_font_size' => '9',
+        'default_font_size' => 9,
         'default_font' => 'courier',
-        'margin_left' => '0',
-        'margin_right' => '0',
-        'margin_top' => '1mm',
-        'margin_bottom' => '0',
-        'margin_header' => '0',
-        'margin_footer' => '0'
+        'margin_left' => 0,
+        'margin_right' => 0,
+        'margin_top' => 1,
+        'margin_bottom' => 0,
+        'margin_header' => 0,
+        'margin_footer' => 0
     ]);
     $pdf->text_input_as_HTML = true;
 

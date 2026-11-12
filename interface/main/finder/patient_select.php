@@ -472,7 +472,9 @@ if ($result) {
             if ($results = sqlFetchArray($statement)) {
                 $last_date_seen = $results['mydate'];
                 $day_diff = $results['day_diff'];
-                $next_appt_date = xl($results['next_appt_day']) . ', ' . oeFormatShortDate($results['next_appt']);
+                $next_appt_date = !empty($results['next_appt_day']) && !Utilities::isDateEmpty($results['next_appt'])
+                    ? xl($results['next_appt_day']) . ', ' . oeFormatShortDate($results['next_appt'])
+                    : '';
             }
 
           // calculate date differences based on date of last encounter regardless of billing
@@ -488,7 +490,9 @@ if ($result) {
             if ($results = sqlFetchArray($statement)) {
                 $last_date_seen = $results['mydate'];
                 $day_diff = $results['day_diff'];
-                $next_appt_date = xl($results['next_appt_day']) . ', ' . oeFormatShortDate($results['next_appt']);
+                $next_appt_date = !empty($results['next_appt_day']) && !Utilities::isDateEmpty($results['next_appt'])
+                    ? xl($results['next_appt_day']) . ', ' . oeFormatShortDate($results['next_appt'])
+                    : '';
             }
 
           //calculate count of encounters by distinct billing dates with cpt4

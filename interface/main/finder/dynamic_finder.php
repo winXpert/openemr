@@ -57,12 +57,8 @@ while ($row = sqlFetchArray($res)) {
     $header .= "   <th>";
     $header .= text($title);
     $header .= "</th>\n";
-    $searchLabel = xl('Search by') . ' ' . $title1;
-    $searchId = 'patient-column-search-' . $colcount;
-    $header0 .= "   <td class='patient-search-cell'><label class='patient-search-label' for='" . attr($searchId) . "'>" .
-        text($searchLabel) . "</label><input type='text' id='" . attr($searchId) . "' size='20' ";
-    $header0 .= "value='' class='form-control search_init' placeholder='" . xla('Search') .
-        "' title='" . attr($searchLabel) . "'/></td>\n";
+    $header0 .= "   <td ><input type='text' size='20' ";
+    $header0 .= "value='' class='form-control search_init' placeholder='" . xla("Search by") . " " . $title1 . "'/></td>\n";
     if ($coljson) {
         $coljson .= ", ";
     }
@@ -98,25 +94,6 @@ $session = SessionWrapperFactory::getInstance()->getActiveSession();
     .card {
         border: 0;
         border-radius: 0;
-    }
-
-    #pt_table .patient-search-cell {
-        vertical-align: bottom;
-    }
-
-    #pt_table .patient-search-label {
-        display: block;
-        margin-bottom: 0.25rem;
-        font-size: 0.875rem;
-        font-weight: 600;
-        line-height: 1.3;
-        white-space: normal;
-        overflow-wrap: anywhere;
-    }
-
-    #pt_table .search_init {
-        width: 100%;
-        min-width: 0;
     }
 
     @media screen and (max-width: 640px) {

@@ -11,6 +11,7 @@
 
 use OpenEMR\Common\Acl\AccessDeniedHelper;
 use OpenEMR\Common\Acl\AclMain;
+use OpenEMR\Common\Csrf\CsrfUtils;
 use OpenEMR\Common\Session\SessionWrapperFactory;
 use OpenEMR\Core\OEGlobalsBag;
 use OpenEMR\Services\DocumentTemplates\DocumentTemplateRender;
@@ -27,8 +28,22 @@ if ($is_module) {
     if (!AclMain::aclCheckCore('patients', 'docs')) {
         AccessDeniedHelper::deny('download_template.php (isModule): patients/docs not granted');
     }
-    if ($postPid !== null && $postPid !== '' && $postPid != $session->get('pid')) {
-        AccessDeniedHelper::deny('download_template.php (isModule): POST pid does not match session pid');
+    CsrfUtils::checkCsrfInput(INPUT_POST, dieOnFail: true);
+    // Staff can open the editor for a patient other than the currently active
+    // chart. Authorize that explicit patient without changing the chart session.
+    $requestedPid = $postPid !== null && $postPid !== '' ? $postPid : $session->get('pid');
+    $pid = filter_var($requestedPid, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+    if ($pid === false) {
+        http_response_code(400);
+        exit(xlt('No patient selected.'));
+    }
+    $patient = sqlQuery('SELECT pid, squad FROM patient_data WHERE pid = ?', [$pid]);
+    if (empty($patient)) {
+        http_response_code(404);
+        exit(xlt('Patient not found.'));
+    }
+    if (!empty($patient['squad']) && !AclMain::aclCheckCore('squads', $patient['squad'])) {
+        AccessDeniedHelper::deny('download_template.php (isModule): patient squad access not granted');
     }
 } else {
     require_once(__DIR__ . "/../verify_session.php");
@@ -44,9 +59,11 @@ if ($is_module) {
 }
 
 $form_id = $_POST['template_id'] ?? null;
-// For isModule (staff) the active chart in the session is authoritative — the POST pid, if any, has already been
-// validated against the session pid above.
-$pid = $is_module ? ($session->get('pid') ?? 0) : ($postPid ?? 0);
+// Staff patient context was authorized above; portal context always comes from
+// the authenticated portal session, never from an unvalidated POST value.
+if (!$is_module) {
+    $pid = $session->get('pid');
+}
 $user = $session->get('authUserID') ?? $session->get('sessionUser'); // session 'sessionUser' is '-patient-'
 $prepared_doc = xlt("Error! Missing template or template unavailable.");
 if (!empty($form_id)) {

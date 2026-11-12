@@ -16,6 +16,7 @@
 
 require_once("../../globals.php");
 
+use OpenEMR\BC\ServiceContainer;
 use OpenEMR\Common\Acl\AccessDeniedHelper;
 use OpenEMR\Common\Acl\AclMain;
 use OpenEMR\Common\Forms\EncounterFormAccess;
@@ -80,6 +81,14 @@ $encounter = $sensitivityEncounterId;
 
 $formLocator = new FormLocator();
 $file = $formLocator->findFile($_GET['formname'], $pageName, 'load_form.php');
+if (!is_file($file) || !is_readable($file)) {
+    http_response_code(Response::HTTP_NOT_FOUND);
+    echo ServiceContainer::getTwig()->render('error/general_http_error.html.twig', [
+        'statusCode' => Response::HTTP_NOT_FOUND,
+        'errorMessage' => 'This encounter form is not installed or its files are unavailable. Please contact your administrator to restore the form files or disable its registration.',
+    ]);
+    exit;
+}
 require_once($file);
 
 $id = $clean_id;
