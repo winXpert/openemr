@@ -13,7 +13,7 @@
       {foreach from=$providers item=provider}
       <tr>
           <td>
-              <a href="{$CURRENT_ACTION}action=edit&id=default&provider_id={$provider->id|attr_url}" onclick="top.restoreSession()">
+                    <a href="{$CURRENT_ACTION}action=edit&id=default&provider_id={$provider->id|escape:'url'}" onclick="top.restoreSession()">
                   {$provider->get_name_display()|text}
               </a>
           </td>

@@ -16,7 +16,7 @@
       {foreach from=$partners item=partner}
       <tr>
           <td>
-              <a href="{$CURRENT_ACTION}action=edit&x12_partner_id={$partner->id|attr}" onclick="top.restoreSession()">
+                    <a href="{$CURRENT_ACTION}action=edit&x12_partner_id={$partner->id|escape:'url'}" onclick="top.restoreSession()">
                   {$partner->get_name()|text}&nbsp;
               </a>
           </td>

@@ -24,7 +24,8 @@ class C_PracticeSettings extends Controller
         $this->assign("FORM_ACTION", OEGlobalsBag::getInstance()->get('webroot') . "/controller.php?" . attr($_SERVER['QUERY_STRING']));
         $this->assign("TOP_ACTION", OEGlobalsBag::getInstance()->get('webroot') . "/controller.php?" . "practice_settings" . "&");
         $this->assign("STYLE", OEGlobalsBag::getInstance()->get('style'));
-        $this->direction = (OEGlobalsBag::getInstance()->get('_SESSION')['language_direction'] == 'rtl') ? 'right' : 'left';
+        $languageDirection = OEGlobalsBag::getInstance()->get('_SESSION')['language_direction'] ?? 'ltr';
+        $this->direction = ($languageDirection === 'rtl') ? 'right' : 'left';
     }
 
     public function default_action($display = ""): string
