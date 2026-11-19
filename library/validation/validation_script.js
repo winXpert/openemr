@@ -83,6 +83,21 @@ window.OeFormValidation = (function(window) {
 
             //get the input value after removing hide fields
             elements = validate.collectFormValues(form);
+
+            // Page validation rules can contain fields that are not rendered by
+            // the current layout. Do not make a form impossible to submit for
+            // a control that is not present in the form.
+            for (var constraintKey in constraints) {
+                var constraintElement = document.getElementsByName(constraintKey)[0] ||
+                    document.getElementsByName(constraintKey + '[]')[0];
+                if (constraintKey !== 'custom_messages' &&
+                    (!constraintElement || !$(constraintElement).is(':visible') ||
+                    (!Object.prototype.hasOwnProperty.call(elements, constraintKey) &&
+                    !Object.prototype.hasOwnProperty.call(elements, constraintKey + '[]')))) {
+                    delete constraints[constraintKey];
+                }
+            }
+
             //custom validate for multiple select(failed validate.js)
             //the validate js cannot handle the LBF multiple select fields
             for(var key in elements){
@@ -97,7 +112,9 @@ window.OeFormValidation = (function(window) {
                         if(constraints[new_key].presence && (elements[key].length == 0 || elements[key][0] == null )) {
 
                             appendError(element, new_key);
-                            e.preventDefault();
+                            if (e && typeof e.preventDefault === 'function') {
+                                e.preventDefault();
+                            }
                             valid = false;
                         }
                     }
@@ -112,7 +129,7 @@ window.OeFormValidation = (function(window) {
             var errors = validate(elements, constraints, {fullMessages: false});
             if (typeof  errors !== 'undefined') {
                 //prevent default if trigger is submit button
-                if(typeof (e) !== 'undefined') {
+                if (e && typeof e.preventDefault === 'function') {
                     e.preventDefault();
                 }
                 showErrors(form, errors);

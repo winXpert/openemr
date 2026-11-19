@@ -255,7 +255,7 @@ function newEncounter(data, evt) {
     const url = webroot_url + '/interface/forms/newpatient/new.php?' + params.toString();
     navigateTab(url, "enc", function () {
         activateTabByName("enc", true);
-    });
+    }, xl("Loading New Patient Form"));
 }
 // AI-generated code end
 
