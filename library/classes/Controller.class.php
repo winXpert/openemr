@@ -99,6 +99,11 @@ class Controller extends Smarty implements ControllerInterface
          // Document templates still use {$value|js_escape}; without this
          // registration Smarty treats it as an unregistered function.
          $this->registerPlugin('modifier', 'js_escape', 'js_escape');
+         // Register the attribute escaping helpers used by document templates.
+         // Otherwise Smarty falls back to deprecated unregistered functions.
+         $this->registerPlugin('modifier', 'attr', 'attr');
+         $this->registerPlugin('modifier', 'attr_js', 'attr_js');
+         $this->registerPlugin('modifier', 'attr_url', 'attr_url');
          $this->assign("PROCESS", "true");
          $this->assign("HEADER", "<html><head></head><body>");
          $this->assign("FOOTER", "</body></html>");

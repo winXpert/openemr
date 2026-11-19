@@ -1608,11 +1608,12 @@ if (!empty($_POST['form_refresh']) || !empty($_POST['form_export']) || !empty($_
             ?>
   </td>
             <?php
-            if ($form_cb_err) {
-                echo "  <td class='detail'>&nbsp;";
-                echo text($row['billing_errmsg']) . "</td>\n";
-            }
+                if ($form_cb_err) {
+                    echo "  <td class='detail'>&nbsp;";
+                    echo text($row['billing_errmsg']) . "</td>\n";
+                }
             ?>
+            
  </tr>
             <?php
         } elseif ($_POST['form_csvexport']) { // end not insurance summary, not export, not csvexport, not clear_ins_debt
